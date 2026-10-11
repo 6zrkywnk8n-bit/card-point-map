@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b6b4f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>カード還元マップ</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --text:#1b1f24; --muted:#5f6b7a; --line:#e3e6ea;
+  --smbc:#0b8a5f; --mufg:#d0222f; --both:#6a3fc4; --accent:#1d4ed8;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111418; --panel:#1b1f25; --text:#e8ebef; --muted:#9aa5b1; --line:#2c323a;
+    --smbc:#2fbf8a; --mufg:#ff5a64; --both:#9b7bff; --accent:#6ea0ff;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif}
+#app{display:flex;flex-direction:column;height:100dvh}
+header{display:flex;align-items:center;gap:8px;padding:8px 12px;padding-top:max(8px,env(safe-area-inset-top));
+  background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:16px;margin:0;flex:1}
+.chips{display:flex;gap:6px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
+.chip{border:1.5px solid var(--line);background:transparent;color:var(--text);border-radius:999px;
+  padding:5px 12px;font-size:13px;white-space:nowrap;cursor:pointer}
+.chip.on[data-k="smbc"]{border-color:var(--smbc);background:color-mix(in srgb,var(--smbc) 15%,transparent)}
+.chip.on[data-k="mufg"]{border-color:var(--mufg);background:color-mix(in srgb,var(--mufg) 15%,transparent)}
+.chip.on[data-k="both"]{border-color:var(--both);background:color-mix(in srgb,var(--both) 15%,transparent)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+#map{flex:1;min-height:0}
+#sheet{background:var(--panel);border-top:1px solid var(--line);max-height:38dvh;overflow:auto;
+  padding-bottom:env(safe-area-inset-bottom)}
+#status{padding:8px 12px;font-size:13px;color:var(--muted)}
+.row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid var(--line);cursor:pointer}
+.row .nm{flex:1;min-width:0}
+.row .nm b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .nm span{font-size:12px;color:var(--muted)}
+.badge{font-size:12px;font-weight:700;color:#fff;border-radius:6px;padding:3px 7px;white-space:nowrap}
+.dist{font-size:12px;color:var(--muted);white-space:nowrap}
+button.icon{border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:8px;
+  padding:6px 10px;font-size:13px;cursor:pointer}
+.fab{position:absolute;right:12px;z-index:500;border:none;border-radius:50%;width:46px;height:46px;
+  box-shadow:0 2px 8px rgba(0,0,0,.3);font-size:20px;background:var(--panel);color:var(--text);cursor:pointer}
+#mapwrap{position:relative;flex:1;min-height:0;display:flex}
+#locate{bottom:16px}
+#search{bottom:70px;font-size:14px;width:auto;border-radius:23px;padding:0 14px;font-weight:600;color:var(--accent)}
+.leaflet-popup-content{font-size:13px;line-height:1.5}
+.pp b{font-size:14px}
+.pp .c{margin-top:4px;padding:4px 6px;border-radius:6px;background:rgba(0,0,0,.05)}
+.pp a{color:var(--accent)}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);
+  width:min(420px,calc(100vw - 32px));padding:16px}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog label{display:flex;justify-content:space-between;align-items:center;margin:10px 0;font-size:14px;gap:8px}
+dialog input{width:80px;padding:6px;font-size:14px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--text)}
+dialog p{font-size:12px;color:var(--muted);line-height:1.6}
+.me{width:16px;height:16px;border-radius:50%;background:#1d72f3;border:3px solid #fff;box-shadow:0 0 0 2px rgba(29,114,243,.35)}
+.pin{width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;
+  box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
+.pin span{transform:rotate(45deg);color:#fff;font-size:10px;font-weight:800}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>💳 カード還元マップ</h1>
+    <button class="icon" id="settingsBtn">⚙ 設定</button>
+  </header>
+  <div class="chips">
+    <button class="chip on" data-k="smbc"><span class="dot" style="background:var(--smbc)"></span>三井住友</button>
+    <button class="chip on" data-k="mufg"><span class="dot" style="background:var(--mufg)"></span>三菱UFJ</button>
+    <button class="chip on" data-k="both"><span class="dot" style="background:var(--both)"></span>両方対象</button>
+  </div>
+  <div id="mapwrap">
+    <div id="map"></div>
+    <button class="fab" id="search">この周辺を検索</button>
+    <button class="fab" id="locate" title="現在地">◎</button>
+  </div>
+  <div id="sheet"><div id="status">現在地を取得しています…</div><div id="list"></div></div>
+</div>
+
+<dialog id="settings">
+  <h3 style="margin:0 0 4px">還元率の設定</h3>
+  <label>三井住友カード（%）<input type="number" step="0.5" id="rSmbc"></label>
+  <label>三菱UFJカード（%）<input type="number" step="0.5" id="rMufg"></label>
+  <label>検索半径（m）<input type="number" step="100" id="rRadius"></label>
+  <p>三井住友：スマホのVisa/Mastercardタッチ決済が条件（カード現物は5%、iD・差し込みは対象外）。<br>
+     三菱UFJ：基本7%、条件達成で最大20%。ご自身の実際の還元率に合わせてください。<br>
+     対象店舗は2026年10月時点の公式ページを元にしています。駅ナカ・商業施設内など一部対象外の店舗があります。店舗データは OpenStreetMap 由来のため、載っていない店もあります。</p>
+  <div style="text-align:right"><button class="icon" id="saveSettings">保存</button></div>
+</dialog>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// ===== 対象店舗の定義 =====
+// t: 店舗種別の絞り込み（conv=コンビニ, food=飲食, super=スーパー, any=制限なし）
+const STORES = {
+  smbc: [
+    ["セイコーマート", /セイコーマート|seicomart/i, "conv"],
+    ["ハセガワストア", /ハセガワストア/, "conv"],
+    ["セブン-イレブン", /セブン.?イレブン|7.?eleven/i, "conv"],
+    ["ポプラ", /ポプラ|poplar|生活彩家/i, "conv"],
+    ["ミニストップ", /ミニストップ|ministop/i, "conv"],
+    ["ローソン", /ローソン|lawson/i, "conv"],
+    ["マクドナルド", /マクドナルド|mcdonald/i, "food"],
+    ["モスバーガー", /モスバーガー|mos ?burger/i, "food"],
+    ["ケンタッキー", /ケンタッキー|kfc|kentucky/i, "food"],
+    ["吉野家", /吉野家|yoshinoya/i, "food"],
+    ["フレッシュネスバーガー", /フレッシュネス/, "food"],
+    ["サイゼリヤ", /サイゼリヤ|saizeriya/i, "food"],
+    ["ガスト", /ガスト|gusto/i, "food"],
+    ["バーミヤン", /バーミヤン|bamiyan/i, "food"],
+    ["しゃぶ葉", /しゃぶ葉/, "food"],
+    ["ジョナサン", /ジョナサン|jonathan/i, "food"],
+    ["夢庵", /夢庵|ゆめあん/, "food"],
+    ["から好し", /から好し/, "food"],
+    ["むさしの森珈琲", /むさしの森/, "food"],
+    ["藍屋", /藍屋/, "food"],
+    ["グラッチェガーデンズ", /グラッチェ/, "food"],
+    ["魚屋路", /魚屋路/, "food"],
+    ["chawan", /chawan/i, "food"],
+    ["とんから亭", /とんから亭/, "food"],
+    ["桃菜", /桃菜/, "food"],
+    ["すき家", /すき家|sukiya/i, "food"],
+    ["はま寿司", /はま寿司|hama.?sushi/i, "food"],
+    ["ココス", /^ココス|coco'?s/i, "food"],
+    ["ドトール", /ドトール|doutor/i, "food"],
+    ["エクセルシオール カフェ", /エクセルシオール|excelsior/i, "food"],
+    ["かっぱ寿司", /かっぱ寿司|kappa.?sushi/i, "food"],
+  ],
+  mufg: [
+    ["セブン-イレブン", /セブン.?イレブン|7.?eleven/i, "conv"],
+    ["ローソン", /ローソン|lawson/i, "conv"],
+    ["上島珈琲店", /上島珈琲/, "food"],
+    ["UCC Cafe Plaza", /ucc.?cafe/i, "food"],
+    ["カフェ・ド・クリエ", /クリエ|cafe de crie/i, "food"],
+    ["スターバックス", /スターバックス|starbucks/i, "food"],
+    ["くら寿司", /くら寿司|kura.?sushi/i, "food"],
+    ["スシロー", /スシロー|sushiro/i, "food"],
+    ["松屋", /^松屋(?!銀座)|matsuya/i, "food"],
+    ["松のや", /松のや/, "food"],
+    ["マイカリー食堂", /マイカリー食堂/, "food"],
+    ["ゼッテリア", /ゼッテリア|zetteria/i, "food"],
+    ["アカチャンホンポ", /アカチャンホンポ|akachan/i, "any"],
+    ["カーブス", /カーブス|curves/i, "any"],
+    ["アオキスーパー", /アオキスーパー|フードストアあおき/, "super"],
+    ["オーケー", /^オーケー|^ok ?store/i, "super"],
+    ["オオゼキ", /オオゼキ/, "super"],
+    ["サンリブ", /サンリブ|マルショク/, "super"],
+    ["三和", /三和|フードワン/, "super"],
+    ["スーパー魚長", /魚長|生鮮乃木市場|生鮮げんき市場/, "super"],
+    ["近商ストア", /近商ストア|ハーベス/, "super"],
+    ["東急ストア", /東急ストア|プレッセ|フードステーション/, "super"],
+    ["東武ストア", /東武ストア/, "super"],
+    ["ドミー", /ドミー/, "super"],
+    ["肉のハナマサ", /ハナマサ/, "super"],
+    ["ジャパンミート", /ジャパンミート|パワーマート/, "super"],
+    ["フィール", /^フィール/, "super"],
+    ["ヤマナカ", /ヤマナカ|フランテ/, "super"],
+  ],
+};
+const NOTES = {
+  smbc: "スマホのタッチ決済で支払い（Apple Pay / Google Pay のVisa・Mastercardタッチ）。iD・差し込みは対象外",
+  mufg: "三菱UFJカードで支払い（条件達成で還元率アップ）",
+};
+
+// ===== 設定 =====
+const DEF = { smbc: 7, mufg: 9, radius: 1000 };
+let cfg = { ...DEF };
+try { Object.assign(cfg, JSON.parse(localStorage.getItem("cpm-cfg") || "{}")); } catch {}
+const show = { smbc: true, mufg: true, both: true };
+
+// ===== 地図 =====
+const map = L.map("map", { zoomControl: false }).setView([35.681, 139.767], 15);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap contributors',
+}).addTo(map);
+const layer = L.layerGroup().addTo(map);
+let meMarker = null, meAcc = null, me = null, shops = [], origin = null;
+
+function color(k){ return getComputedStyle(document.documentElement).getPropertyValue("--" + k).trim(); }
+function cardsFor(tags){
+  const name = [tags.name, tags["name:ja"], tags.brand, tags["brand:ja"], tags["brand:en"]].filter(Boolean).join(" / ");
+  if (!name || tags.disused || tags.amenity === "vacant") return null;
+  const isConv = tags.shop === "convenience";
+  const isFood = ["restaurant","fast_food","cafe","food_court","ice_cream"].includes(tags.amenity);
+  const isSuper = ["supermarket","butcher","grocery"].includes(tags.shop);
+  const ok = t => t === "any" || (t === "conv" && isConv) || (t === "food" && isFood) || (t === "super" && isSuper);
+  const hit = {};
+  for (const k of ["smbc","mufg"]) {
+    const s = STORES[k].find(([, re, t]) => re.test(name) && ok(t));
+    if (s) hit[k] = s[0];
+  }
+  return Object.keys(hit).length ? hit : null;
+}
+function kindOf(h){ return h.smbc && h.mufg ? "both" : h.smbc ? "smbc" : "mufg"; }
+function best(h){
+  if (h.smbc && h.mufg) return cfg.smbc >= cfg.mufg ? (cfg.smbc === cfg.mufg ? "どちらでも" : "三井住友") : "三菱UFJ";
+  return h.smbc ? "三井住友" : "三菱UFJ";
+}
+function rateLabel(h){
+  if (h.smbc && h.mufg) return Math.max(cfg.smbc, cfg.mufg) + "%";
+  return (h.smbc ? cfg.smbc : cfg.mufg) + "%";
+}
+function dist(a, b){
+  const R = 6371000, r = Math.PI / 180;
+  const dLat = (b[0]-a[0])*r, dLon = (b[1]-a[1])*r;
+  const x = Math.sin(dLat/2)**2 + Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+function fmtDist(m){ return m < 1000 ? Math.round(m) + "m" : (m/1000).toFixed(1) + "km"; }
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+function pinIcon(k, label){
+  return L.divIcon({ className: "", iconSize: [26,26], iconAnchor: [13,26], popupAnchor: [0,-24],
+    html: `<div class="pin" style="background:${color(k)}"><span>${label}</span></div>` });
+}
+function popupHtml(s){
+  const h = s.hit, gm = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}`;
+  let html = `<div class="pp"><b>${esc(s.name)}</b>`;
+  if (me) html += ` <span style="color:var(--muted)">${fmtDist(s.d)}</span>`;
+  html += `<div style="margin-top:4px">おすすめ：<b>${best(h)}</b>（${rateLabel(h)}）</div>`;
+  if (h.smbc) html += `<div class="c"><span class="dot" style="background:${color("smbc")}"></span>三井住友 ${cfg.smbc}%<br><small>${NOTES.smbc}</small></div>`;
+  if (h.mufg) html += `<div class="c"><span class="dot" style="background:${color("mufg")}"></span>三菱UFJ ${cfg.mufg}%<br><small>${NOTES.mufg}</small></div>`;
+  return html + `<div style="margin-top:6px"><a href="${gm}" target="_blank" rel="noopener">Googleマップで経路 ↗</a></div></div>`;
+}
+
+function render(){
+  layer.clearLayers();
+  const vis = shops.filter(s => show[s.kind]);
+  const from = me || origin;
+  if (from) vis.forEach(s => s.d = dist(from, [s.lat, s.lon]));
+  vis.sort((a, b) => (a.d ?? 0) - (b.d ?? 0));
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+  vis.forEach(s => {
+    const lbl = s.kind === "both" ? "W" : s.kind === "smbc" ? "SM" : "UF";
+    const m = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind, lbl) }).bindPopup(() => popupHtml(s)).addTo(layer);
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<span class="badge" style="background:${color(s.kind)}">${rateLabel(s.hit)}</span>
+      <div class="nm"><b>${esc(s.name)}</b><span>${best(s.hit)}カードで</span></div>
+      <span class="dist">${s.d != null ? fmtDist(s.d) : ""}</span>`;
+    row.onclick = () => { map.setView([s.lat, s.lon], 17); m.openPopup(); };
+    list.appendChild(row);
+  });
+  setStatus(shops.length ? `${vis.length}件の対象店舗（近い順）` : "この周辺に対象店舗が見つかりませんでした");
+}
+function setStatus(t){ document.getElementById("status").textContent = t; }
+
+// ===== 店舗取得（OpenStreetMap / Overpass API）=====
+const ENDPOINTS = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+// OSMのregexは先読み非対応なので除去し、重複も削る
+const ALL_RE = [...new Set([...STORES.smbc, ...STORES.mufg].map(([, re]) => re.source.replace(/\^/g, "").replace(/\(\?![^)]*\)/g, "")))].join("|");
+const cache = {};
+let loading = false;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function fetchShops(lat, lon){
+  if (loading) return;
+  loading = true;
+  setStatus("周辺の対象店舗を検索中…");
+  const key = lat.toFixed(3) + "," + lon.toFixed(3) + "," + cfg.radius;
+  const q = `[out:json][timeout:25];nwr(around:${cfg.radius},${lat},${lon})[name~"${ALL_RE}",i];out center tags;`;
+  let data = cache[key] || null;
+  // 公開サーバーは混雑しやすいので、エンドポイントを切り替えながら最大3周リトライ
+  for (let round = 0; !data && round < 3; round++) {
+    for (const ep of ENDPOINTS) {
+      try {
+        const r = await fetch(ep, { method: "POST", body: "data=" + encodeURIComponent(q),
+          headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: AbortSignal.timeout(20000) });
+        if (r.ok) { data = await r.json(); break; }
+      } catch {}
+    }
+    if (!data) { setStatus(`サーバー混雑中… 再試行しています（${round + 1}/3）`); await sleep(4000 * (round + 1)); }
+  }
+  if (data) cache[key] = data;
+  origin = [lat, lon];
+  loading = false;
+  if (!data) { setStatus("店舗データの取得に失敗しました。少し待って「この周辺を検索」を押してください。"); return; }
+  const seen = new Set();
+  shops = [];
+  for (const e of data.elements) {
+    const hit = cardsFor(e.tags || {});
+    if (!hit) continue;
+    const la = e.lat ?? e.center?.lat, lo = e.lon ?? e.center?.lon;
+    const key = la.toFixed(4) + lo.toFixed(4) + Object.values(hit).join();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    shops.push({ name: e.tags.name || e.tags.brand, lat: la, lon: lo, hit, kind: kindOf(hit) });
+  }
+  render();
+}
+
+// ===== GPS =====
+function placeMe(lat, lon, acc){
+  me = [lat, lon];
+  if (!meMarker) {
+    meMarker = L.marker(me, { icon: L.divIcon({ className: "", html: '<div class="me"></div>', iconSize: [16,16], iconAnchor: [8,8] }), zIndexOffset: 1000 }).addTo(map);
+    meAcc = L.circle(me, { radius: acc, color: "#1d72f3", weight: 1, fillOpacity: .08 }).addTo(map);
+  } else { meMarker.setLatLng(me); meAcc.setLatLng(me).setRadius(acc); }
+}
+function locate(first){
+  if (!navigator.geolocation) { setStatus("この端末では位置情報が使えません"); const c = map.getCenter(); fetchShops(c.lat, c.lng); return; }
+  setStatus("現在地を取得しています…");
+  navigator.geolocation.getCurrentPosition(p => {
+    const { latitude: lat, longitude: lon, accuracy } = p.coords;
+    placeMe(lat, lon, accuracy);
+    map.setView(me, 16);
+    fetchShops(lat, lon);
+  }, err => {
+    setStatus("位置情報を取得できませんでした（" + err.message + "）。地図を動かして「この周辺を検索」を押してください。");
+    if (first) { const c = map.getCenter(); fetchShops(c.lat, c.lng); }
+  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+}
+// 移動中も現在地マーカーを追従
+if (navigator.geolocation) navigator.geolocation.watchPosition(p => placeMe(p.coords.latitude, p.coords.longitude, p.coords.accuracy), () => {}, { enableHighAccuracy: true });
+
+// ===== UI =====
+document.getElementById("locate").onclick = () => locate(false);
+document.getElementById("search").onclick = () => { const c = map.getCenter(); fetchShops(c.lat, c.lng); };
+document.querySelectorAll(".chip").forEach(b => b.onclick = () => {
+  show[b.dataset.k] = !show[b.dataset.k];
+  b.classList.toggle("on", show[b.dataset.k]);
+  render();
+});
+const dlg = document.getElementById("settings");
+document.getElementById("settingsBtn").onclick = () => {
+  rSmbc.value = cfg.smbc; rMufg.value = cfg.mufg; rRadius.value = cfg.radius;
+  dlg.showModal();
+};
+document.getElementById("saveSettings").onclick = () => {
+  cfg.smbc = +rSmbc.value || DEF.smbc;
+  cfg.mufg = +rMufg.value || DEF.mufg;
+  cfg.radius = Math.min(5000, Math.max(300, +rRadius.value || DEF.radius));
+  try { localStorage.setItem("cpm-cfg", JSON.stringify(cfg)); } catch {}
+  dlg.close();
+  render();
+};
+
+locate(true);
+</script>
+</body>
+</html>
