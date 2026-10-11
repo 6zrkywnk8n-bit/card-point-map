@@ -1,0 +1,12 @@
+{
+  "_説明": "OpenStreetMap に載っていない対象店舗を手で追加するリスト。build-data.mjs が stores.json に合流させる。座標は国土地理院の住所検索で住所から求めた。checked は情報を確認した日。",
+  "stores": [
+    { "name": "八郎そば 白岡店", "lat": 36.04681, "lon": 139.65714, "kind": "f", "address": "埼玉県白岡市野牛1-1", "source": "https://voix.jp/life/?p=19334", "checked": "2026-10-11" },
+    { "name": "八郎そば 東小金井店", "lat": 35.70497, "lon": 139.52127, "kind": "f", "address": "東京都小金井市緑町2-1-37", "source": "https://store-info.skylark.co.jp/hachiro_soba/map/131027/", "checked": "2026-10-11" },
+    { "name": "麦のトリコ 元住吉店", "lat": 35.56427, "lon": 139.65486, "kind": "f", "address": "神奈川県川崎市中原区木月2-8-1", "source": "https://www.ryutsuu.biz/store/q012471.html", "checked": "2026-10-11" },
+    { "name": "トゥックン² 羽村店", "lat": 35.75884, "lon": 139.31749, "kind": "f", "address": "東京都羽村市五ノ神1-2-12", "source": "https://gourmet.watch.impress.co.jp/docs/news/1615036.html", "checked": "2026-10-11" },
+    { "name": "ステーキ屋松 明大前店", "lat": 35.66868, "lon": 139.65068, "kind": "f", "address": "東京都世田谷区松原1-36-7 TRN明大前2F", "source": "https://www.ryutsuu.biz/store/l031112.html", "checked": "2026-10-11" },
+    { "name": "ステーキ屋松 本郷三丁目店", "lat": 35.70788, "lon": 139.76038, "kind": "f", "address": "東京都文京区本郷4-37-15", "source": "https://gourmet.watch.impress.co.jp/docs/news/1526755.html", "checked": "2026-10-11" },
+    { "name": "松太郎 新宿小滝橋通り店", "lat": 35.69725, "lon": 139.69769, "kind": "f", "address": "東京都新宿区西新宿7-7-28 第一山本ビル1F", "source": "https://news.nissyoku.co.jp/restaurant/hamada20251014022145401", "checked": "2026-10-11" }
+  ]
+}

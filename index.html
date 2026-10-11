@@ -27,6 +27,11 @@ header{display:flex;align-items:center;gap:8px;padding:8px 12px;padding-top:max(
   background:var(--panel);border-bottom:1px solid var(--line)}
 header h1{font-size:16px;margin:0;flex:1}
 .chips{display:flex;gap:6px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
+.genres{display:flex;gap:6px;padding:8px 12px 0;background:var(--panel);overflow-x:auto;scrollbar-width:none}
+.genres::-webkit-scrollbar{display:none}
+.genre{border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:999px;padding:6px 12px;
+  font-size:13px;white-space:nowrap;cursor:pointer}
+.genre.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700}
 .chip{border:1.5px solid var(--line);background:transparent;color:var(--text);border-radius:999px;
   padding:5px 12px;font-size:13px;white-space:nowrap;cursor:pointer}
 .chip.on[data-k="smbc"]{border-color:var(--smbc);background:color-mix(in srgb,var(--smbc) 15%,transparent)}
@@ -59,6 +64,8 @@ button.icon{border:1px solid var(--line);background:var(--panel);color:var(--tex
 .leaflet-popup-content{font-size:13px;line-height:1.5;max-height:min(320px,34dvh);overflow-y:auto;margin:12px 14px}
 .pp b{font-size:14px}
 .pp .c{margin-top:4px;padding:4px 6px;border-radius:6px;background:rgba(0,0,0,.05)}
+.pp .must{display:block;margin-top:4px;padding:6px 8px;border-radius:6px;border:2px solid #e11d48;
+  background:color-mix(in srgb,#e11d48 10%,transparent);color:var(--text);font-weight:700;font-size:13px;line-height:1.5}
 .pp a{color:var(--accent)}
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);
   width:min(420px,calc(100vw - 32px));padding:16px}
@@ -85,6 +92,7 @@ dialog p{font-size:12px;color:var(--muted);line-height:1.6}
     <button id="qClear" hidden>×</button>
     <datalist id="brandList"></datalist>
   </div>
+  <div class="genres" id="genres"></div>
   <div class="chips">
     <button class="chip on" data-k="smbc"><span class="dot" style="background:var(--smbc)"></span>三井住友</button>
     <button class="chip on" data-k="mufg"><span class="dot" style="background:var(--mufg)"></span>三菱UFJ</button>
@@ -118,6 +126,8 @@ const STORES = {
   smbc: [
     ["セイコーマート", /セイコーマート|seicomart/i, "conv"],
     ["ハセガワストア", /ハセガワストア/, "conv"],
+    ["タイエー", /タイエー/, "conv"],
+    ["ハマナスクラブ", /ハマナスクラブ/, "conv"],
     ["セブン-イレブン", /セブン.?イレブン|7.?eleven/i, "conv"],
     ["ポプラ", /ポプラ|poplar|生活彩家/i, "conv"],
     ["ミニストップ", /ミニストップ|ministop/i, "conv"],
@@ -141,6 +151,9 @@ const STORES = {
     ["chawan", /chawan/i, "food"],
     ["とんから亭", /とんから亭/, "food"],
     ["桃菜", /桃菜/, "food"],
+    ["La Ohana", /la ?ohana|ラ ?オハナ/i, "food"],
+    ["八郎そば", /八郎そば/, "food"],
+    ["三〇三", /三〇三/, "food"],
     ["すき家", /すき家|sukiya/i, "food"],
     ["はま寿司", /はま寿司|hama.?sushi/i, "food"],
     ["ココス", /^ココス|coco'?s/i, "food"],
@@ -161,21 +174,27 @@ const STORES = {
     ["松屋", /^松屋(?!銀座)|matsuya/i, "food"],
     ["松のや", /松のや/, "food"],
     ["マイカリー食堂", /マイカリー食堂/, "food"],
+    ["ステーキ屋松", /ステーキ屋松/, "food"],
+    ["松軒中華食堂", /松軒中華食堂/, "food"],
+    ["トゥックン²", /トゥックン/, "food"],
+    ["麦のトリコ", /麦のトリコ/, "food"],
+    ["松太郎", /^松太郎/, "food"],
     ["ゼッテリア", /ゼッテリア|zetteria/i, "food"],
+    ["ピザハット", /ピザハット|pizza ?hut/i, "any"],
     ["アカチャンホンポ", /アカチャンホンポ|akachan/i, "any"],
     ["カーブス", /カーブス|curves/i, "any"],
     ["アオキスーパー", /アオキスーパー|フードストアあおき/, "super"],
     ["オーケー", /^オーケー|^ok ?store/i, "super"],
     ["オオゼキ", /オオゼキ/, "super"],
-    ["サンリブ", /サンリブ|マルショク/, "super"],
+    ["サンリブ", /サンリブ|マルショク|リブホール|^サンク( |　|$)/, "super"],
     ["三和", /三和|フードワン/, "super"],
     ["スーパー魚長", /魚長|生鮮乃木市場|生鮮げんき市場/, "super"],
-    ["近商ストア", /近商ストア|ハーベス/, "super"],
+    ["近商ストア", /近商ストア|ハーベス|pochette|ポシェット/i, "super"],
     ["東急ストア", /東急ストア|プレッセ|フードステーション/, "super"],
     ["東武ストア", /東武ストア/, "super"],
     ["ドミー", /ドミー/, "super"],
     ["肉のハナマサ", /ハナマサ/, "super"],
-    ["ジャパンミート", /ジャパンミート|パワーマート/, "super"],
+    ["ジャパンミート", /ジャパンミート|パワーマート|meat ?meet/i, "super"],
     ["フィール", /^フィール/, "super"],
     ["ヤマナカ", /ヤマナカ|フランテ/, "super"],
   ],
@@ -185,6 +204,7 @@ const NOTES = {
   smbc: "スマホのタッチ決済（Apple Pay / Google Pay のVisa・Mastercard）で支払い。カード現物のタッチ・iD・差し込みは対象外。1万円超で差し込みになると対象外",
   mufg: "カード払い・カードのタッチ決済・Apple Pay（QUICPay）で支払い。スマホのタッチ決済は対象外",
 };
+const MATSU_ONLINE = "店頭（券売機・レジ）での支払いは対象外！「松弁ネット」または「松屋モバイルオーダー」で注文し、三菱UFJカードで事前決済したときだけ対象（導入済み店舗のみ）";
 // 店舗ごとの条件。true のものは共通条件を置き換える（＝支払い方法自体が違う）
 const STORE_NOTES = {
   smbc: {
@@ -197,6 +217,8 @@ const STORE_NOTES = {
     "サイゼリヤ": "一部対象外店舗あり（公式の対象店舗一覧で確認）",
     "ローソン": "ナチュラルローソン・ローソンストア100・ローソンスリーエフも対象",
     "セイコーマート": "タイエー・ハマナスクラブ・ハセガワストアも対象",
+    "タイエー": "セイコーマート系列として対象",
+    "ハマナスクラブ": "セイコーマート系列として対象",
     "ポプラ": "生活彩家も対象",
   },
   mufg: {
@@ -210,6 +232,12 @@ const STORE_NOTES = {
     "くら寿司": "店頭払いが対象。スマホでのお持ち帰り・オンライン事前決済は対象外",
     "カフェ・ド・クリエ": "モバイルオーダー・クリエカードへのチャージは対象外",
     "ゼッテリア": "店頭払いと公式アプリのモバイルオーダーが対象",
+    "ステーキ屋松": [MATSU_ONLINE, true],
+    "松軒中華食堂": [MATSU_ONLINE, true],
+    "トゥックン²": [MATSU_ONLINE, true],
+    "麦のトリコ": [MATSU_ONLINE, true],
+    "松太郎": [MATSU_ONLINE, true],
+    "ピザハット": ["店頭での支払いは対象外！ピザハット公式サイト・公式アプリで注文し、三菱UFJカードでオンライン決済したときだけ対象（Uber Eatsなど他社デリバリー経由も対象外）", true],
     "アカチャンホンポ": "店頭はVisa・Mastercard・JCB払いのみ（QUICPayは対象外）。Online Shopも対象",
     "カーブス": "入会金・月会費が対象",
     "肉のハナマサ": "フランチャイズ店は対象外",
@@ -218,10 +246,25 @@ const STORE_NOTES = {
     "フィール": "テナント・ネット利用は対象外",
   },
 };
+// Googleマップ風のジャンル分け（STORES の表示名で引く）
+const GENRES = [
+  ["conv", "🏪 コンビニ", ["セイコーマート", "ハセガワストア", "タイエー", "ハマナスクラブ", "セブン-イレブン", "ポプラ", "ミニストップ", "ローソン"]],
+  ["cafe", "☕ カフェ", ["ドトール", "エクセルシオール カフェ", "むさしの森珈琲", "上島珈琲店", "UCC Cafe Plaza", "カフェ・ド・クリエ", "スターバックス"]],
+  ["fast", "🍔 ファストフード", ["マクドナルド", "モスバーガー", "ケンタッキー", "フレッシュネスバーガー", "ゼッテリア", "ピザハット"]],
+  ["don", "🍚 牛丼・定食", ["吉野家", "すき家", "松屋", "松のや", "マイカリー食堂", "から好し", "とんから亭", "八郎そば", "ステーキ屋松", "松軒中華食堂", "トゥックン²", "麦のトリコ", "松太郎"]],
+  ["sushi", "🍣 寿司", ["はま寿司", "かっぱ寿司", "くら寿司", "スシロー", "魚屋路"]],
+  ["family", "🍝 ファミレス", ["サイゼリヤ", "ガスト", "バーミヤン", "しゃぶ葉", "ジョナサン", "夢庵", "藍屋", "グラッチェガーデンズ", "chawan", "桃菜", "ココス", "La Ohana", "三〇三"]],
+  ["super", "🛒 スーパー", ["アオキスーパー", "オーケー", "オオゼキ", "サンリブ", "三和", "スーパー魚長", "近商ストア", "東急ストア", "東武ストア", "ドミー", "肉のハナマサ", "ジャパンミート", "フィール", "ヤマナカ"]],
+  ["other", "その他", ["アカチャンホンポ", "カーブス"]],
+];
+const GENRE_OF = Object.fromEntries(GENRES.flatMap(([k, , names]) => names.map(n => [n, k])));
+const genreOf = h => GENRE_OF[h.smbc || h.mufg] || "other";
+let genre = "";
+
 const COMMON_EXCLUDE = "商業施設・駅ビル内などは一部対象外の店舗あり";
 function cardNote(k, brand){
   const sn = STORE_NOTES[k][brand];
-  if (Array.isArray(sn)) return `<b>⚠ ${sn[0]}</b>`;
+  if (Array.isArray(sn)) return `<span class="must">⚠ ${sn[0]}</span>`;
   return NOTES[k] + (sn ? `<br>📝 ${sn}` : "");
 }
 
@@ -337,7 +380,10 @@ function renderList(vis = shops.filter(s => show[s.kind] && matchQuery(s))){
   const more = inView.length > LIST_MAX ? `（近い${LIST_MAX}件を表示）` : "（近い順）";
   if (query) setStatus(inView.length ? `「${query}」表示範囲に${inView.length}件${more}`
     : vis.length ? `「${query}」は表示範囲の外にあります（${vis.length}件）` : `「${query}」はこの付近に見つかりません。地図を縮小・移動してみてください`);
-  else setStatus(inView.length ? `表示範囲に${inView.length}件の対象店舗${more}` : "表示範囲に対象店舗がありません。地図を縮小・移動してみてください");
+  else {
+    const g = genre ? GENRES.find(([k]) => k === genre)[1].replace(/^\S+ /, "") : "対象店舗";
+    setStatus(inView.length ? `表示範囲に${inView.length}件の${g}${more}` : `表示範囲に${g}がありません。地図を縮小・移動してみてください`);
+  }
   return vis;
 }
 function setStatus(t){ document.getElementById("status").textContent = t; }
@@ -477,6 +523,7 @@ let query = "";
 const norm = t => String(t || "").normalize("NFKC").toLowerCase()
   .replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/[\s・\-ー‐]/g, "");
 function matchQuery(s){
+  if (genre && genreOf(s.hit) !== genre) return false;
   if (!query) return true;
   const q = norm(query);
   return [s.name, s.hit.smbc, s.hit.mufg, ...s.alt].some(t => t && norm(t).includes(q));
@@ -495,6 +542,14 @@ qInput.addEventListener("input", () => applyQuery(false));
 qInput.addEventListener("change", () => applyQuery(true));
 qInput.addEventListener("keydown", e => { if (e.key === "Enter") { qInput.blur(); applyQuery(true); } });
 qClear.onclick = () => { qInput.value = ""; applyQuery(false); };
+
+const genreBox = document.getElementById("genres");
+genreBox.innerHTML = GENRES.map(([k, label]) => `<button class="genre" data-g="${k}">${label}</button>`).join("");
+genreBox.querySelectorAll(".genre").forEach(b => b.onclick = () => {
+  genre = genre === b.dataset.g ? "" : b.dataset.g;
+  genreBox.querySelectorAll(".genre").forEach(x => x.classList.toggle("on", x.dataset.g === genre));
+  render();
+});
 
 document.querySelectorAll(".chip").forEach(b => b.onclick = () => {
   show[b.dataset.k] = !show[b.dataset.k];
