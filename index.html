@@ -36,6 +36,10 @@ header h1{font-size:16px;margin:0;flex:1}
 #sheet{background:var(--panel);border-top:1px solid var(--line);max-height:38dvh;overflow:auto;
   padding-bottom:env(safe-area-inset-bottom)}
 #status{padding:8px 12px;font-size:13px;color:var(--muted)}
+.qbar{display:flex;gap:6px;padding:8px 12px 0;background:var(--panel)}
+.qbar input{flex:1;min-width:0;font-size:16px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;
+  background:var(--bg);color:var(--text)}
+.qbar button{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:10px;padding:0 12px;font-size:14px;cursor:pointer}
 .row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid var(--line);cursor:pointer}
 .row .nm{flex:1;min-width:0}
 .row .nm b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -71,6 +75,11 @@ dialog p{font-size:12px;color:var(--muted);line-height:1.6}
     <h1>💳 カード還元マップ</h1>
     <button class="icon" id="settingsBtn">⚙ 設定</button>
   </header>
+  <div class="qbar">
+    <input id="q" type="search" list="brandList" placeholder="🔍 店舗名で検索（例：ローソン、スシロー）" autocomplete="off" enterkeyhint="search">
+    <button id="qClear" hidden>×</button>
+    <datalist id="brandList"></datalist>
+  </div>
   <div class="chips">
     <button class="chip on" data-k="smbc"><span class="dot" style="background:var(--smbc)"></span>三井住友</button>
     <button class="chip on" data-k="mufg"><span class="dot" style="background:var(--mufg)"></span>三菱UFJ</button>
@@ -232,7 +241,7 @@ function popupHtml(s){
 
 function render(){
   layer.clearLayers();
-  const vis = shops.filter(s => show[s.kind]);
+  const vis = shops.filter(s => show[s.kind] && matchQuery(s));
   const from = me || origin;
   if (from) vis.forEach(s => s.d = dist(from, [s.lat, s.lon]));
   vis.sort((a, b) => (a.d ?? 0) - (b.d ?? 0));
@@ -249,7 +258,10 @@ function render(){
     row.onclick = () => { map.setView([s.lat, s.lon], 17); m.openPopup(); };
     list.appendChild(row);
   });
-  setStatus(shops.length ? `${vis.length}件の対象店舗（近い順）` : "この周辺に対象店舗が見つかりませんでした");
+  if (!shops.length) setStatus("この周辺に対象店舗が見つかりませんでした");
+  else if (query) setStatus(vis.length ? `「${query}」${vis.length}件（近い順）` : `「${query}」はこの周辺に見つかりません。地図を動かして「この周辺を検索」を押してください`);
+  else setStatus(`${vis.length}件の対象店舗（近い順）`);
+  return vis;
 }
 function setStatus(t){ document.getElementById("status").textContent = t; }
 
@@ -291,7 +303,7 @@ async function fetchShops(lat, lon){
     const key = la.toFixed(4) + lo.toFixed(4) + Object.values(hit).join();
     if (seen.has(key)) continue;
     seen.add(key);
-    shops.push({ name: e.tags.name || e.tags.brand, lat: la, lon: lo, hit, kind: kindOf(hit) });
+    shops.push({ name: e.tags.name || e.tags.brand, alt: [e.tags.brand, e.tags["name:en"], e.tags["brand:en"]], lat: la, lon: lo, hit, kind: kindOf(hit) });
   }
   render();
 }
@@ -323,6 +335,31 @@ if (navigator.geolocation) navigator.geolocation.watchPosition(p => placeMe(p.co
 // ===== UI =====
 document.getElementById("locate").onclick = () => locate(false);
 document.getElementById("search").onclick = () => { const c = map.getCenter(); fetchShops(c.lat, c.lng); };
+// ===== 店舗名検索 =====
+// カタカナ/ひらがな・全角/半角・大文字/小文字の違いを無視して部分一致
+let query = "";
+const norm = t => String(t || "").normalize("NFKC").toLowerCase()
+  .replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/[\s・\-ー‐]/g, "");
+function matchQuery(s){
+  if (!query) return true;
+  const q = norm(query);
+  return [s.name, s.hit.smbc, s.hit.mufg, ...s.alt].some(t => t && norm(t).includes(q));
+}
+document.getElementById("brandList").innerHTML = [...new Set([...STORES.smbc, ...STORES.mufg].map(([n]) => n))]
+  .map(n => `<option value="${esc(n)}">`).join("");
+const qInput = document.getElementById("q"), qClear = document.getElementById("qClear");
+function applyQuery(fit){
+  query = qInput.value.trim();
+  qClear.hidden = !query;
+  const vis = render();
+  // 検索語があるときは該当店舗が全部入るように地図を合わせる
+  if (fit && query && vis.length) map.fitBounds(L.latLngBounds(vis.map(s => [s.lat, s.lon])).pad(0.2), { maxZoom: 17 });
+}
+qInput.addEventListener("input", () => applyQuery(false));
+qInput.addEventListener("change", () => applyQuery(true));
+qInput.addEventListener("keydown", e => { if (e.key === "Enter") { qInput.blur(); applyQuery(true); } });
+qClear.onclick = () => { qInput.value = ""; applyQuery(false); };
+
 document.querySelectorAll(".chip").forEach(b => b.onclick = () => {
   show[b.dataset.k] = !show[b.dataset.k];
   b.classList.toggle("on", show[b.dataset.k]);
