@@ -7,6 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>カード還元マップ</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css">
 <style>
 :root{
   --bg:#f6f7f9; --panel:#ffffff; --text:#1b1f24; --muted:#5f6b7a; --line:#e3e6ea;
@@ -55,7 +56,6 @@ button.icon{border:1px solid var(--line);background:var(--panel);color:var(--tex
   box-shadow:0 2px 8px rgba(0,0,0,.3);font-size:20px;background:var(--panel);color:var(--text);cursor:pointer}
 #mapwrap{position:relative;flex:1;min-height:0;display:flex}
 #locate{bottom:16px}
-#search{bottom:70px;font-size:14px;width:auto;border-radius:23px;padding:0 14px;font-weight:600;color:var(--accent)}
 .leaflet-popup-content{font-size:13px;line-height:1.5;max-height:min(320px,34dvh);overflow-y:auto;margin:12px 14px}
 .pp b{font-size:14px}
 .pp .c{margin-top:4px;padding:4px 6px;border-radius:6px;background:rgba(0,0,0,.05)}
@@ -70,6 +70,8 @@ dialog p{font-size:12px;color:var(--muted);line-height:1.6}
 .pin{width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;
   box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
 .pin span{transform:rotate(45deg);color:#fff;font-size:10px;font-weight:800}
+.cl{border-radius:50%;color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;
+  border:3px solid rgba(255,255,255,.85);box-shadow:0 1px 5px rgba(0,0,0,.35);font-size:13px}
 </style>
 </head>
 <body>
@@ -90,7 +92,6 @@ dialog p{font-size:12px;color:var(--muted);line-height:1.6}
   </div>
   <div id="mapwrap">
     <div id="map"></div>
-    <button class="fab" id="search">この周辺を検索</button>
     <button class="fab" id="locate" title="現在地">◎</button>
   </div>
   <div id="sheet"><div id="warn" hidden></div><div id="status">現在地を取得しています…</div><div id="list"></div></div>
@@ -100,15 +101,16 @@ dialog p{font-size:12px;color:var(--muted);line-height:1.6}
   <h3 style="margin:0 0 4px">還元率の設定</h3>
   <label>三井住友カード（%）<input type="number" step="0.5" id="rSmbc"></label>
   <label>三菱UFJカード（%）<input type="number" step="0.5" id="rMufg"></label>
-  <label>検索半径（m）<input type="number" step="100" id="rRadius"></label>
   <p>三井住友：スマホのタッチ決済・モバイルオーダーが条件（カード現物のタッチ・iD・差し込みは対象外）。<br>
      三菱UFJ：カード・カードのタッチ決済・Apple Pay(QUICPay)が条件（スマホのタッチ決済は対象外）。基本7%、条件達成で最大20%。<br>
      ご自身の実際の還元率に合わせてください。店舗ごとの条件はピンをタップすると表示されます。<br>
+     <span id="dataDate"></span><br>
      対象店舗は2026年10月時点の公式ページを元にしています。駅ナカ・商業施設内など一部対象外の店舗があります。店舗データは OpenStreetMap 由来のため、載っていない店もあります。</p>
   <div style="text-align:right"><button class="icon" id="saveSettings">保存</button></div>
 </dialog>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
 <script>
 // ===== 対象店舗の定義 =====
 // t: 店舗種別の絞り込み（conv=コンビニ, food=飲食, super=スーパー, any=制限なし）
@@ -224,7 +226,7 @@ function cardNote(k, brand){
 }
 
 // ===== 設定 =====
-const DEF = { smbc: 7, mufg: 9, radius: 1000 };
+const DEF = { smbc: 7, mufg: 9 };
 let cfg = { ...DEF };
 try { Object.assign(cfg, JSON.parse(localStorage.getItem("cpm-cfg") || "{}")); } catch {}
 const show = { smbc: true, mufg: true, both: true };
@@ -236,8 +238,19 @@ const map = L.map("map", { zoomControl: false }).setView(startAt, 15);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19, attribution: '&copy; OpenStreetMap contributors',
 }).addTo(map);
-const layer = L.layerGroup().addTo(map);
-let meMarker = null, meAcc = null, me = null, shops = [], origin = null;
+// 密集した店舗は件数入りの丸にまとめる。丸の色は中で一番多い種類の色
+const layer = L.markerClusterGroup({
+  maxClusterRadius: 45, disableClusteringAtZoom: 18, showCoverageOnHover: false, chunkedLoading: true,
+  iconCreateFunction: c => {
+    const n = c.getChildCount(), cnt = { smbc: 0, mufg: 0, both: 0 };
+    c.getAllChildMarkers().forEach(m => cnt[m.options.kind]++);
+    const top = Object.keys(cnt).reduce((a, b) => cnt[a] >= cnt[b] ? a : b);
+    const size = n < 10 ? 34 : n < 50 ? 40 : n < 200 ? 46 : 52;
+    return L.divIcon({ className: "", iconSize: [size, size],
+      html: `<div class="cl" style="width:${size}px;height:${size}px;background:${color(top)}">${n}</div>` });
+  },
+}).addTo(map);
+let meMarker = null, meAcc = null, me = null, shops = [];
 
 function color(k){ return getComputedStyle(document.documentElement).getPropertyValue("--" + k).trim(); }
 function cardsFor(tags){
@@ -279,7 +292,7 @@ function pinIcon(k, label){
 function popupHtml(s){
   const h = s.hit, gm = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}`;
   let html = `<div class="pp"><b>${esc(s.name)}</b>`;
-  if (me) html += ` <span style="color:var(--muted)">${fmtDist(s.d)}</span>`;
+  if (me) html += ` <span style="color:var(--muted)">${fmtDist(dist(me, [s.lat, s.lon]))}</span>`;
   html += `<div style="margin-top:4px">おすすめ：<b>${best(h)}</b>（${rateLabel(h)}）</div>`;
   if (h.smbc) html += `<div class="c"><span class="dot" style="background:${color("smbc")}"></span><b>三井住友 ${cfg.smbc}%</b><br><small>${cardNote("smbc", h.smbc)}</small></div>`;
   if (h.mufg) html += `<div class="c"><span class="dot" style="background:${color("mufg")}"></span><b>三菱UFJ ${cfg.mufg}%</b><br><small>${cardNote("mufg", h.mufg)}</small></div>`;
@@ -287,47 +300,105 @@ function popupHtml(s){
   return html + `<div style="margin-top:6px"><a href="${gm}" target="_blank" rel="noopener">Googleマップで経路 ↗</a></div></div>`;
 }
 
+const LIST_MAX = 100;
+let popupOpen = false;
+map.on("popupopen", () => popupOpen = true).on("popupclose", () => popupOpen = false);
+
+// マーカーを作り直す（店舗の読み込み・絞り込みが変わったとき）
 function render(){
   layer.clearLayers();
   const vis = shops.filter(s => show[s.kind] && matchQuery(s));
-  const from = me || origin;
-  if (from) vis.forEach(s => s.d = dist(from, [s.lat, s.lon]));
-  vis.sort((a, b) => (a.d ?? 0) - (b.d ?? 0));
+  layer.addLayers(vis.map(s => {
+    const lbl = s.kind === "both" ? "W" : s.kind === "smbc" ? "SM" : "UF";
+    s.marker = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind, lbl), kind: s.kind })
+      .bindPopup(() => popupHtml(s), { maxWidth: 280, autoPanPadding: [10, 10] });
+    return s.marker;
+  }));
+  return renderList(vis);
+}
+// 一覧は「いま地図に見えている範囲」の店を近い順に
+function renderList(vis = shops.filter(s => show[s.kind] && matchQuery(s))){
+  const b = map.getBounds(), c = map.getCenter();
+  const from = me && b.contains(me) ? me : [c.lat, c.lng];
+  const inView = vis.filter(s => b.contains([s.lat, s.lon]));
+  inView.forEach(s => s.d = dist(from, [s.lat, s.lon]));
+  inView.sort((a, b) => a.d - b.d);
   const list = document.getElementById("list");
   list.innerHTML = "";
-  vis.forEach(s => {
-    const lbl = s.kind === "both" ? "W" : s.kind === "smbc" ? "SM" : "UF";
-    const m = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind, lbl) }).bindPopup(() => popupHtml(s), { maxWidth: 280, autoPanPadding: [10, 10] }).addTo(layer);
+  inView.slice(0, LIST_MAX).forEach(s => {
     const row = document.createElement("div");
     row.className = "row";
     row.innerHTML = `<span class="badge" style="background:${color(s.kind)}">${rateLabel(s.hit)}</span>
       <div class="nm"><b>${esc(s.name)}</b><span>${best(s.hit)}カードで</span></div>
-      <span class="dist">${s.d != null ? fmtDist(s.d) : ""}</span>`;
-    row.onclick = () => { map.setView([s.lat, s.lon], 17, { animate: false }); m.openPopup(); };
+      <span class="dist">${fmtDist(s.d)}</span>`;
+    row.onclick = () => layer.zoomToShowLayer(s.marker, () => s.marker.openPopup());
     list.appendChild(row);
   });
-  if (!shops.length) setStatus("この周辺に対象店舗が見つかりませんでした");
-  else if (query) setStatus(vis.length ? `「${query}」${vis.length}件（近い順）` : `「${query}」はこの周辺に見つかりません。地図を動かして「この周辺を検索」を押してください`);
-  else setStatus(`${vis.length}件の対象店舗（近い順）`);
+  const more = inView.length > LIST_MAX ? `（近い${LIST_MAX}件を表示）` : "（近い順）";
+  if (query) setStatus(inView.length ? `「${query}」表示範囲に${inView.length}件${more}`
+    : vis.length ? `「${query}」は表示範囲の外にあります（${vis.length}件）` : `「${query}」はこの付近に見つかりません。地図を縮小・移動してみてください`);
+  else setStatus(inView.length ? `表示範囲に${inView.length}件の対象店舗${more}` : "表示範囲に対象店舗がありません。地図を縮小・移動してみてください");
   return vis;
 }
 function setStatus(t){ document.getElementById("status").textContent = t; }
 
-// ===== 店舗取得（OpenStreetMap / Overpass API）=====
+// ===== 店舗データ =====
+// 全国の対象店舗をまとめた stores.json（build-data.mjs で作成）を最初に1回だけ読み込み、
+// 以降の検索は端末内で行う。読み込めなかったときだけ Overpass API に直接問い合わせる。
+let DB = null;
+const dbReady = fetch("stores.json").then(r => r.ok ? r.json() : null).then(d => {
+  DB = d;
+  if (d) document.getElementById("dataDate").textContent = `店舗データ：${d.updated} 時点（${d.count.toLocaleString()}店舗）`;
+}).catch(() => {});
+function searchLocal(b){
+  const res = [], S = b.getSouth(), N = b.getNorth(), W = b.getWest(), E = b.getEast();
+  for (const [la, lo, name, alt, k] of DB.stores) {
+    if (la < S || la > N || lo < W || lo > E) continue;
+    const tags = { name: alt ? name + " / " + alt : name,
+      shop: k === "c" ? "convenience" : k === "s" ? "supermarket" : undefined, amenity: k === "f" ? "restaurant" : undefined };
+    const hit = cardsFor(tags);
+    if (hit) res.push({ name, alt: [alt], lat: la, lon: lo, hit, kind: kindOf(hit) });
+  }
+  return res;
+}
+
+// ===== 店舗取得（OpenStreetMap / Overpass API、stores.json が無いときの予備）=====
 const ENDPOINTS = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
 // OSMのregexは先読み非対応なので除去し、重複も削る
 const ALL_RE = [...new Set([...STORES.smbc, ...STORES.mufg].map(([, re]) => re.source.replace(/\^/g, "").replace(/\(\?![^)]*\)/g, "")))].join("|");
 const cache = {};
-let loading = false;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-async function fetchShops(lat, lon){
-  if (loading) return;
-  loading = true;
-  setStatus("周辺の対象店舗を検索中…");
-  const key = lat.toFixed(3) + "," + lon.toFixed(3) + "," + cfg.radius;
-  const q = `[out:json][timeout:25];nwr(around:${cfg.radius},${lat},${lon})[name~"${ALL_RE}",i];out center tags;`;
-  let data = cache[key] || null;
-  // 公開サーバーは混雑しやすいので、エンドポイントを切り替えながら最大3周リトライ
+// 地図の表示範囲が読み込み済みの範囲に収まっていれば一覧だけ更新、はみ出したら読み込み直す
+const MIN_ZOOM_LOCAL = 10, MIN_ZOOM_ONLINE = 14;
+let loaded = null, loadSeq = 0;
+async function refresh(){
+  if (!DB) { setStatus("店舗データを読み込み中…"); await dbReady; }
+  const view = map.getBounds();
+  if (loaded && loaded.contains(view)) { renderList(); return; }
+  if (map.getZoom() < (DB ? MIN_ZOOM_LOCAL : MIN_ZOOM_ONLINE)) {
+    layer.clearLayers(); shops = []; loaded = null;
+    document.getElementById("list").innerHTML = "";
+    setStatus("地図を拡大すると対象店舗が表示されます");
+    return;
+  }
+  if (popupOpen) return;  // 吹き出しを見ている間は作り直さない
+  const area = view.pad(DB ? 0.5 : 0.2);
+  const seq = ++loadSeq;
+  const res = DB ? searchLocal(area) : await fetchOnline(area);
+  if (seq !== loadSeq || !res) return;  // 読み込み中に地図が動いたら古い結果は捨てる
+  shops = res; loaded = area;
+  render();
+}
+let moveTimer;
+map.on("moveend", () => { clearTimeout(moveTimer); moveTimer = setTimeout(refresh, DB ? 150 : 700); });
+
+// stores.json が無いときの予備：Overpass API に表示範囲を問い合わせる
+async function fetchOnline(b){
+  const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map(v => v.toFixed(4)).join(",");
+  if (cache[bbox]) return cache[bbox];
+  setStatus("周辺の対象店舗を検索中…（時間がかかることがあります）");
+  const q = `[out:json][timeout:25];nwr(${bbox})[name~"${ALL_RE}",i];out center tags;`;
+  let data = null;
   for (let round = 0; !data && round < 3; round++) {
     for (const ep of ENDPOINTS) {
       try {
@@ -338,12 +409,8 @@ async function fetchShops(lat, lon){
     }
     if (!data) { setStatus(`サーバー混雑中… 再試行しています（${round + 1}/3）`); await sleep(4000 * (round + 1)); }
   }
-  if (data) cache[key] = data;
-  origin = [lat, lon];
-  loading = false;
-  if (!data) { setStatus("店舗データの取得に失敗しました。少し待って「この周辺を検索」を押してください。"); return; }
-  const seen = new Set();
-  shops = [];
+  if (!data) { setStatus("店舗データの取得に失敗しました。少し待ってから地図を動かしてください。"); return null; }
+  const seen = new Set(), res = [];
   for (const e of data.elements) {
     const hit = cardsFor(e.tags || {});
     if (!hit) continue;
@@ -351,9 +418,9 @@ async function fetchShops(lat, lon){
     const key = la.toFixed(4) + lo.toFixed(4) + Object.values(hit).join();
     if (seen.has(key)) continue;
     seen.add(key);
-    shops.push({ name: e.tags.name || e.tags.brand, alt: [e.tags.brand, e.tags["name:en"], e.tags["brand:en"]], lat: la, lon: lo, hit, kind: kindOf(hit) });
+    res.push({ name: e.tags.name || e.tags.brand, alt: [e.tags.brand, e.tags["name:en"], e.tags["brand:en"]], lat: la, lon: lo, hit, kind: kindOf(hit) });
   }
-  render();
+  return cache[bbox] = res;
 }
 
 // ===== GPS =====
@@ -385,7 +452,7 @@ function showGeoError(err){
   document.getElementById("retryGeo").onclick = () => locate(false);
 }
 function locate(first){
-  if (!navigator.geolocation) { setStatus("この端末では位置情報が使えません"); const c = map.getCenter(); fetchShops(c.lat, c.lng); return; }
+  if (!navigator.geolocation) { setStatus("この端末では位置情報が使えません"); refresh(); return; }
   setStatus("現在地を取得しています…");
   navigator.geolocation.getCurrentPosition(p => {
     const { latitude: lat, longitude: lon, accuracy } = p.coords;
@@ -393,18 +460,17 @@ function locate(first){
     document.getElementById("warn").hidden = true;
     try { localStorage.setItem("cpm-last", JSON.stringify(me)); } catch {}
     map.setView(me, 16);
-    fetchShops(lat, lon);
+    refresh();
   }, err => {
     showGeoError(err);
-    if (first) { const c = map.getCenter(); fetchShops(c.lat, c.lng); }
-  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+    if (first) refresh();
+  }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 120000 });
 }
 // 移動中も現在地マーカーを追従
 if (navigator.geolocation) navigator.geolocation.watchPosition(p => placeMe(p.coords.latitude, p.coords.longitude, p.coords.accuracy), () => {}, { enableHighAccuracy: true });
 
 // ===== UI =====
 document.getElementById("locate").onclick = () => locate(false);
-document.getElementById("search").onclick = () => { const c = map.getCenter(); fetchShops(c.lat, c.lng); };
 // ===== 店舗名検索 =====
 // カタカナ/ひらがな・全角/半角・大文字/小文字の違いを無視して部分一致
 let query = "";
@@ -437,13 +503,12 @@ document.querySelectorAll(".chip").forEach(b => b.onclick = () => {
 });
 const dlg = document.getElementById("settings");
 document.getElementById("settingsBtn").onclick = () => {
-  rSmbc.value = cfg.smbc; rMufg.value = cfg.mufg; rRadius.value = cfg.radius;
+  rSmbc.value = cfg.smbc; rMufg.value = cfg.mufg;
   dlg.showModal();
 };
 document.getElementById("saveSettings").onclick = () => {
   cfg.smbc = +rSmbc.value || DEF.smbc;
   cfg.mufg = +rMufg.value || DEF.mufg;
-  cfg.radius = Math.min(5000, Math.max(300, +rRadius.value || DEF.radius));
   try { localStorage.setItem("cpm-cfg", JSON.stringify(cfg)); } catch {}
   dlg.close();
   render();
