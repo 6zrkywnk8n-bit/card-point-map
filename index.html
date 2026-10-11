@@ -36,6 +36,9 @@ header h1{font-size:16px;margin:0;flex:1}
 #sheet{background:var(--panel);border-top:1px solid var(--line);max-height:38dvh;overflow:auto;
   padding-bottom:env(safe-area-inset-bottom)}
 #status{padding:8px 12px;font-size:13px;color:var(--muted)}
+#warn{margin:8px 12px 0;padding:10px 12px;border-radius:10px;font-size:13px;line-height:1.6;
+  background:color-mix(in srgb,#f59e0b 18%,var(--panel));border:1px solid #f59e0b}
+#warn button{margin-top:6px}
 .qbar{display:flex;gap:6px;padding:8px 12px 0;background:var(--panel)}
 .qbar input{flex:1;min-width:0;font-size:16px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;
   background:var(--bg);color:var(--text)}
@@ -53,7 +56,7 @@ button.icon{border:1px solid var(--line);background:var(--panel);color:var(--tex
 #mapwrap{position:relative;flex:1;min-height:0;display:flex}
 #locate{bottom:16px}
 #search{bottom:70px;font-size:14px;width:auto;border-radius:23px;padding:0 14px;font-weight:600;color:var(--accent)}
-.leaflet-popup-content{font-size:13px;line-height:1.5}
+.leaflet-popup-content{font-size:13px;line-height:1.5;max-height:min(320px,34dvh);overflow-y:auto;margin:12px 14px}
 .pp b{font-size:14px}
 .pp .c{margin-top:4px;padding:4px 6px;border-radius:6px;background:rgba(0,0,0,.05)}
 .pp a{color:var(--accent)}
@@ -90,7 +93,7 @@ dialog p{font-size:12px;color:var(--muted);line-height:1.6}
     <button class="fab" id="search">この周辺を検索</button>
     <button class="fab" id="locate" title="現在地">◎</button>
   </div>
-  <div id="sheet"><div id="status">現在地を取得しています…</div><div id="list"></div></div>
+  <div id="sheet"><div id="warn" hidden></div><div id="status">現在地を取得しています…</div><div id="list"></div></div>
 </div>
 
 <dialog id="settings">
@@ -98,8 +101,9 @@ dialog p{font-size:12px;color:var(--muted);line-height:1.6}
   <label>三井住友カード（%）<input type="number" step="0.5" id="rSmbc"></label>
   <label>三菱UFJカード（%）<input type="number" step="0.5" id="rMufg"></label>
   <label>検索半径（m）<input type="number" step="100" id="rRadius"></label>
-  <p>三井住友：スマホのVisa/Mastercardタッチ決済が条件（カード現物は5%、iD・差し込みは対象外）。<br>
-     三菱UFJ：基本7%、条件達成で最大20%。ご自身の実際の還元率に合わせてください。<br>
+  <p>三井住友：スマホのタッチ決済・モバイルオーダーが条件（カード現物のタッチ・iD・差し込みは対象外）。<br>
+     三菱UFJ：カード・カードのタッチ決済・Apple Pay(QUICPay)が条件（スマホのタッチ決済は対象外）。基本7%、条件達成で最大20%。<br>
+     ご自身の実際の還元率に合わせてください。店舗ごとの条件はピンをタップすると表示されます。<br>
      対象店舗は2026年10月時点の公式ページを元にしています。駅ナカ・商業施設内など一部対象外の店舗があります。店舗データは OpenStreetMap 由来のため、載っていない店もあります。</p>
   <div style="text-align:right"><button class="icon" id="saveSettings">保存</button></div>
 </dialog>
@@ -141,6 +145,7 @@ const STORES = {
     ["ドトール", /ドトール|doutor/i, "food"],
     ["エクセルシオール カフェ", /エクセルシオール|excelsior/i, "food"],
     ["かっぱ寿司", /かっぱ寿司|kappa.?sushi/i, "food"],
+    ["スターバックス", /スターバックス|starbucks/i, "food"],
   ],
   mufg: [
     ["セブン-イレブン", /セブン.?イレブン|7.?eleven/i, "conv"],
@@ -173,10 +178,50 @@ const STORES = {
     ["ヤマナカ", /ヤマナカ|フランテ/, "super"],
   ],
 };
+// カードごとの共通条件（2026年10月時点の公式ページより）
 const NOTES = {
-  smbc: "スマホのタッチ決済で支払い（Apple Pay / Google Pay のVisa・Mastercardタッチ）。iD・差し込みは対象外",
-  mufg: "三菱UFJカードで支払い（条件達成で還元率アップ）",
+  smbc: "スマホのタッチ決済（Apple Pay / Google Pay のVisa・Mastercard）で支払い。カード現物のタッチ・iD・差し込みは対象外。1万円超で差し込みになると対象外",
+  mufg: "カード払い・カードのタッチ決済・Apple Pay（QUICPay）で支払い。スマホのタッチ決済は対象外",
 };
+// 店舗ごとの条件。true のものは共通条件を置き換える（＝支払い方法自体が違う）
+const STORE_NOTES = {
+  smbc: {
+    "スターバックス": ["公式アプリのモバイルオーダーで Apple Pay 払いのときだけ対象。店頭レジでの支払いは対象外", true],
+    "マクドナルド": "公式アプリのモバイルオーダーも対象",
+    "モスバーガー": "モバイルオーダー・モスの配達も対象（他社デリバリー経由は対象外）",
+    "ケンタッキー": "モバイルオーダー・ケンタの配達も対象（他社デリバリー経由は対象外）。一部対象外店舗あり",
+    "吉野家": "モバイルオーダーも対象",
+    "すき家": "モバイルオーダーも対象",
+    "サイゼリヤ": "一部対象外店舗あり（公式の対象店舗一覧で確認）",
+    "ローソン": "ナチュラルローソン・ローソンストア100・ローソンスリーエフも対象",
+    "セイコーマート": "タイエー・ハマナスクラブ・ハセガワストアも対象",
+    "ポプラ": "生活彩家も対象",
+  },
+  mufg: {
+    "スターバックス": ["スターバックス カードへのオンライン入金（チャージ）のときだけ対象。店頭での入金・支払い、Apple Payでのチャージは対象外", true],
+    "セブン-イレブン": "複合商業施設内など一部対象外。スマホレジ・セブン自販機・ネット注文は対象外",
+    "ローソン": "ナチュラルローソン・ローソンストア100も対象。駅・ビル内・ガソリンスタンド併設の一部店舗、スマホレジは対象外",
+    "松屋": "券売機・セルフレジでのカード払い / Apple Pay(QUICPay)が対象。モバイルオーダー・松弁ネットも対象。SA・PA内は対象外",
+    "松のや": "券売機・セルフレジでのカード払い / Apple Pay(QUICPay)が対象。SA・PA内は対象外",
+    "マイカリー食堂": "券売機・セルフレジでのカード払い / Apple Pay(QUICPay)が対象",
+    "スシロー": "店頭払いが対象。オンライン決済・京樽スシロー・スシローToGoは対象外",
+    "くら寿司": "店頭払いが対象。スマホでのお持ち帰り・オンライン事前決済は対象外",
+    "カフェ・ド・クリエ": "モバイルオーダー・クリエカードへのチャージは対象外",
+    "ゼッテリア": "店頭払いと公式アプリのモバイルオーダーが対象",
+    "アカチャンホンポ": "店頭はVisa・Mastercard・JCB払いのみ（QUICPayは対象外）。Online Shopも対象",
+    "カーブス": "入会金・月会費が対象",
+    "肉のハナマサ": "フランチャイズ店は対象外",
+    "東急ストア": "テナント・ネットスーパーは対象外",
+    "東武ストア": "専門店売り場・ネットショップ・手ぶら決済は対象外",
+    "フィール": "テナント・ネット利用は対象外",
+  },
+};
+const COMMON_EXCLUDE = "商業施設・駅ビル内などは一部対象外の店舗あり";
+function cardNote(k, brand){
+  const sn = STORE_NOTES[k][brand];
+  if (Array.isArray(sn)) return `<b>⚠ ${sn[0]}</b>`;
+  return NOTES[k] + (sn ? `<br>📝 ${sn}` : "");
+}
 
 // ===== 設定 =====
 const DEF = { smbc: 7, mufg: 9, radius: 1000 };
@@ -185,7 +230,9 @@ try { Object.assign(cfg, JSON.parse(localStorage.getItem("cpm-cfg") || "{}")); }
 const show = { smbc: true, mufg: true, both: true };
 
 // ===== 地図 =====
-const map = L.map("map", { zoomControl: false }).setView([35.681, 139.767], 15);
+let startAt = [35.681, 139.767];
+try { const l = JSON.parse(localStorage.getItem("cpm-last")); if (Array.isArray(l)) startAt = l; } catch {}
+const map = L.map("map", { zoomControl: false }).setView(startAt, 15);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19, attribution: '&copy; OpenStreetMap contributors',
 }).addTo(map);
@@ -234,8 +281,9 @@ function popupHtml(s){
   let html = `<div class="pp"><b>${esc(s.name)}</b>`;
   if (me) html += ` <span style="color:var(--muted)">${fmtDist(s.d)}</span>`;
   html += `<div style="margin-top:4px">おすすめ：<b>${best(h)}</b>（${rateLabel(h)}）</div>`;
-  if (h.smbc) html += `<div class="c"><span class="dot" style="background:${color("smbc")}"></span>三井住友 ${cfg.smbc}%<br><small>${NOTES.smbc}</small></div>`;
-  if (h.mufg) html += `<div class="c"><span class="dot" style="background:${color("mufg")}"></span>三菱UFJ ${cfg.mufg}%<br><small>${NOTES.mufg}</small></div>`;
+  if (h.smbc) html += `<div class="c"><span class="dot" style="background:${color("smbc")}"></span><b>三井住友 ${cfg.smbc}%</b><br><small>${cardNote("smbc", h.smbc)}</small></div>`;
+  if (h.mufg) html += `<div class="c"><span class="dot" style="background:${color("mufg")}"></span><b>三菱UFJ ${cfg.mufg}%</b><br><small>${cardNote("mufg", h.mufg)}</small></div>`;
+  html += `<div style="margin-top:4px;color:var(--muted)"><small>※ ${COMMON_EXCLUDE}</small></div>`;
   return html + `<div style="margin-top:6px"><a href="${gm}" target="_blank" rel="noopener">Googleマップで経路 ↗</a></div></div>`;
 }
 
@@ -249,13 +297,13 @@ function render(){
   list.innerHTML = "";
   vis.forEach(s => {
     const lbl = s.kind === "both" ? "W" : s.kind === "smbc" ? "SM" : "UF";
-    const m = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind, lbl) }).bindPopup(() => popupHtml(s)).addTo(layer);
+    const m = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind, lbl) }).bindPopup(() => popupHtml(s), { maxWidth: 280, autoPanPadding: [10, 10] }).addTo(layer);
     const row = document.createElement("div");
     row.className = "row";
     row.innerHTML = `<span class="badge" style="background:${color(s.kind)}">${rateLabel(s.hit)}</span>
       <div class="nm"><b>${esc(s.name)}</b><span>${best(s.hit)}カードで</span></div>
       <span class="dist">${s.d != null ? fmtDist(s.d) : ""}</span>`;
-    row.onclick = () => { map.setView([s.lat, s.lon], 17); m.openPopup(); };
+    row.onclick = () => { map.setView([s.lat, s.lon], 17, { animate: false }); m.openPopup(); };
     list.appendChild(row);
   });
   if (!shops.length) setStatus("この周辺に対象店舗が見つかりませんでした");
@@ -316,16 +364,38 @@ function placeMe(lat, lon, acc){
     meAcc = L.circle(me, { radius: acc, color: "#1d72f3", weight: 1, fillOpacity: .08 }).addTo(map);
   } else { meMarker.setLatLng(me); meAcc.setLatLng(me).setRadius(acc); }
 }
+// 現在地が取れなかった理由と直し方を、消えない警告として表示する
+function showGeoError(err){
+  const ios = /iPhone|iPad/.test(navigator.userAgent);
+  let msg;
+  if (err.code === 1) {
+    msg = "<b>📍 位置情報の利用が許可されていません</b><br>" + (ios
+      ? "① iPhoneの「設定」→「プライバシーとセキュリティ」→「位置情報サービス」→「Safariのサイト」を「このAppの使用中」に<br>② Safariのアドレスバー左の「ぁあ」→「Webサイトの設定」→「位置情報」を「許可」に"
+      : "Chromeのアドレスバー左のアイコン →「権限」→「位置情報」を「許可」に。端末の位置情報(GPS)がオフならオンにしてください");
+    msg += "<br>設定後、このページを再読み込みしてください。";
+  } else {
+    msg = "<b>📍 現在地を取得できませんでした</b><br>電波の弱い場所や屋内では時間がかかることがあります。";
+  }
+  if (!window.isSecureContext) msg += "<br>※ https:// のURLで開いてください。";
+  if (/Line\/|FBAN|FBAV|Instagram/i.test(navigator.userAgent)) msg += "<br>※ LINEなどのアプリ内ブラウザでは位置情報が使えないことがあります。Safari / Chromeで開いてください。";
+  msg += "<br>いまは前回の場所（または東京駅）を表示しています。<br><button class=\"icon\" id=\"retryGeo\">現在地を再取得</button>";
+  const w = document.getElementById("warn");
+  w.innerHTML = msg;
+  w.hidden = false;
+  document.getElementById("retryGeo").onclick = () => locate(false);
+}
 function locate(first){
   if (!navigator.geolocation) { setStatus("この端末では位置情報が使えません"); const c = map.getCenter(); fetchShops(c.lat, c.lng); return; }
   setStatus("現在地を取得しています…");
   navigator.geolocation.getCurrentPosition(p => {
     const { latitude: lat, longitude: lon, accuracy } = p.coords;
     placeMe(lat, lon, accuracy);
+    document.getElementById("warn").hidden = true;
+    try { localStorage.setItem("cpm-last", JSON.stringify(me)); } catch {}
     map.setView(me, 16);
     fetchShops(lat, lon);
   }, err => {
-    setStatus("位置情報を取得できませんでした（" + err.message + "）。地図を動かして「この周辺を検索」を押してください。");
+    showGeoError(err);
     if (first) { const c = map.getCenter(); fetchShops(c.lat, c.lng); }
   }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
 }
